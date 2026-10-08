@@ -1,0 +1,17 @@
+﻿{
+  "name": "Informe de Temperaturas - Cadena de Frio BETA",
+  "supportEmail": "soporte@tecnoflotas.com",
+  "version": "1.1.0-beta",
+  "items": [
+    {
+      "url": "https://josetecnycom-ai.github.io/Cold_Chain_Beta_1.1/index.html",
+      "path": "ActivityLink/",
+      "menuName": {
+        "en": "Cold Chain Temperature Report (Beta)",
+        "es": "Informe de Temperaturas (Beta)"
+      },
+      "icon": "icon.svg"
+    }
+  ],
+  "isSigned": false
+}
