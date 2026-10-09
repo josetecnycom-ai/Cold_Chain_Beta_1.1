@@ -45,8 +45,11 @@
 .zen-app *, .zen-app *::before, .zen-app *::after {
   box-sizing: border-box !important;
 }
-/* Critical: override any parent flex/grid that makes children inline */
-.zen-app > * { display: block !important; }
+
+/* Critical: override any parent flex/grid that makes children inline.
+   Excludes style/script tags to prevent raw code from rendering! */
+.zen-app > *:not(style):not(script) { display: block !important; }
+.zen-app style, .zen-app script { display: none !important; }
 
 /* ── Page Header ─────────────────────────────────── */
 .zen-app .zen-ph {
