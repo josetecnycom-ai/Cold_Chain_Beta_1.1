@@ -578,14 +578,20 @@ function resetEmptyState(){
   hideSt();
 }
 
+function hasSerialNumber(d){
+  if(!d||d.serialNumber==null)return false;
+  var s=String(d.serialNumber).trim();
+  return s!==''&&s!=='000-000-0000'&&s!=='000000000000'&&s.toLowerCase()!=='none';
+}
+
 function onDevIn(){
   var t=el.ds.value.trim();
   if(t.length<2){hideAC();return;}
-  api.call('Get',{typeName:'Device',search:{name:'%'+t+'%',fromDate:new Date().toISOString()},resultsLimit:50},
+  api.call('Get',{typeName:'Device',search:{name:'%'+t+'%'},resultsLimit:100},
     function(r){
       var now=Date.now();
       var active=(r||[]).filter(function(d){
-        return !d.activeTo || (new Date(d.activeTo).getTime() > now);
+        return hasSerialNumber(d) && (!d.activeTo || (new Date(d.activeTo).getTime() > now));
       }).slice(0,12);
       renderAC(active);
     },
