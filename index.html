@@ -265,6 +265,7 @@
 }
 .zen-app .zen-alert-i { background: var(--p-lt) !important; color: var(--p-dk) !important; border: 1px solid var(--p-bd) !important; }
 .zen-app .zen-alert-e { background: var(--err-bg) !important; color: var(--err) !important; border: 1px solid #FFCDD2 !important; }
+.zen-app .zen-alert-w { background: #FFF4E5 !important; color: #B25E00 !important; border: 1px solid #FFE0B2 !important; }
 .zen-app .zen-spin {
   display: block !important; width: 16px !important; height: 16px !important;
   flex-shrink: 0 !important; border: 2px solid rgba(0,100,168,.2) !important;
@@ -373,9 +374,12 @@
 }
 .zen-app .zen-empty p {
   display: block !important;
-  max-width: 400px !important; margin: 0 auto !important;
+  max-width: 480px !important; margin: 0 auto !important;
   font-size: 13px !important; line-height: 1.7 !important;
 }
+.zen-app .zen-empty.zen-empty-warn { border-color: #FFE0B2 !important; background: #FFFDF9 !important; }
+.zen-app .zen-empty.zen-empty-warn .zen-empty-t { color: #B25E00 !important; font-size: 15px !important; }
+.zen-app .zen-empty.zen-empty-warn p { color: #664600 !important; max-width: 540px !important; }
 
 @media print {
   .zen-app .zen-filters, .zen-app #generateBtn, .zen-app #exportPdfBtn { display: none !important; }
@@ -502,11 +506,13 @@
 
 <!-- EMPTY STATE -->
 <section class="zen-panel zen-empty" id="emptyState">
-  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
-  </svg>
-  <span class="zen-empty-t">Sin datos que mostrar</span>
-  <p>Selecciona un activo, el rango de fechas y horas, y pulsa <strong>Generar informe</strong> para consultar las temperaturas registradas.</p>
+  <div id="emptyIcon">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>
+    </svg>
+  </div>
+  <span class="zen-empty-t" id="emptyTitle">Sin datos que mostrar</span>
+  <p id="emptyDesc">Selecciona un activo, el rango de fechas y horas, y pulsa <strong>Generar informe</strong> para consultar las temperaturas registradas.</p>
 </section>
 
 </div><!-- /.zen-app -->
@@ -520,7 +526,22 @@ var DIAGS={
   machine:[{id:'RefrigerationUnitTemperatureZone1Id',label:'Retorno Z1'},{id:'RefrigerationUnitSetTemperatureZone1Id',label:'Consigna Z1'},{id:'RefrigerationUnitTemperatureZone2Id',label:'Retorno Z2'},{id:'RefrigerationUnitSetTemperatureZone2Id',label:'Consigna Z2'}],
   probes:[{id:'RemoteProbe1TemperatureId',label:'Sonda 1'},{id:'RemoteProbe2TemperatureId',label:'Sonda 2'},{id:'RemoteProbe3TemperatureId',label:'Sonda 3'}]
 };
-var SRCLBL={thermograph:'Termografo',machine:'Maquina de frio',probes:'Sondas'};
+var SRCLBL={thermograph:'Termógrafo',machine:'Máquina de frío',probes:'Sondas'};
+var NO_DATA_TITLES={
+  thermograph:'Sin datos de termógrafo',
+  machine:'Sin datos de máquina de frío',
+  probes:'Sin datos de sondas'
+};
+var NO_DATA_DESCS={
+  thermograph:'Sin datos o sin conexión con el termógrafo en el periodo seleccionado.',
+  machine:'Sin datos o sin conexión con la máquina de frío en el periodo seleccionado.',
+  probes:'Sin datos o sin conexión con las sondas de temperatura en el periodo seleccionado.'
+};
+var NO_DATA_HINTS={
+  thermograph:'Comprueba que el remolque tenga el termógrafo encendido (Euroscan, Transcan, etc.) y el módulo uReader/IOX conectado.',
+  machine:'Comprueba que la máquina de frío (Carrier, Thermo King, etc.) esté conectada, encendida y transmitiendo datos.',
+  probes:'Comprueba que las sondas de temperatura estén conectadas físicamente y transmitiendo.'
+};
 var chart=null;
 geotab.addin.coldChainTempReport=function(){
 var api=null,el={},dev=null,timer=null,rep=null;
@@ -534,6 +555,7 @@ function cache(){
   el.rp=$('resultsPanel');el.rt=$('resultsTitle');el.rb=$('resultsBadges');
   el.cp=$('chartPanel');el.cl=$('chartLegend');el.cv=$('tempChart');
   el.tp=$('tablePanel');el.tbl=$('resultsTable');el.pdf=$('exportPdfBtn');el.em=$('emptyState');
+  el.ei=$('emptyIcon');el.et=$('emptyTitle');el.ed=$('emptyDesc');
 }
 function p2(n){return(n<10?'0':'')+n;}
 function tdv(d){return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());}
@@ -547,14 +569,31 @@ function fdate(d){return p2(d.getDate())+'/'+p2(d.getMonth()+1)+'/'+d.getFullYea
 function fdt(ms){var d=new Date(ms);return fdate(d)+' '+p2(d.getHours())+':'+p2(d.getMinutes());}
 function ilbl(m){return m===60?'1 hora':m+' min';}
 
+function resetEmptyState(){
+  el.em.className='zen-panel zen-empty';
+  el.ei.innerHTML='<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>';
+  el.et.textContent='Sin datos que mostrar';
+  el.ed.innerHTML='Selecciona un activo, el rango de fechas y horas, y pulsa <strong>Generar informe</strong> para consultar las temperaturas registradas.';
+  el.em.hidden=false;
+  hideSt();
+}
+
 function onDevIn(){
   var t=el.ds.value.trim();
   if(t.length<2){hideAC();return;}
-  api.call('Get',{typeName:'Device',search:{name:'%'+t+'%'},resultsLimit:10},
-    function(r){renderAC(r||[]);},function(e){console.error(e);});
+  api.call('Get',{typeName:'Device',search:{name:'%'+t+'%',fromDate:new Date().toISOString()},resultsLimit:50},
+    function(r){
+      var now=Date.now();
+      var active=(r||[]).filter(function(d){
+        return !d.activeTo || (new Date(d.activeTo).getTime() > now);
+      }).slice(0,12);
+      renderAC(active);
+    },
+    function(e){console.error(e);}
+  );
 }
 function renderAC(devs){
-  if(!devs.length){el.dr.innerHTML='<div class="zen-ac-empty">Sin resultados</div>';el.dr.hidden=false;return;}
+  if(!devs.length){el.dr.innerHTML='<div class="zen-ac-empty">Sin resultados de activos activos</div>';el.dr.hidden=false;return;}
   el.dr.innerHTML=devs.map(function(d){return'<button type="button" class="zen-aci">'+esc(d.name)+'</button>';}).join('');
   el.dr.hidden=false;
   var items=el.dr.querySelectorAll('.zen-aci');
@@ -563,7 +602,7 @@ function renderAC(devs){
 }
 function hideAC(){el.dr.hidden=true;el.dr.innerHTML='';}
 function selDev(id,name){dev={id:id,name:name};el.ds.value='';el.ds.hidden=true;hideAC();el.dsn.textContent=name;el.dsel.hidden=false;}
-function clrDev(){dev=null;el.ds.hidden=false;el.dsel.hidden=true;el.ds.focus();}
+function clrDev(){dev=null;el.ds.hidden=false;el.dsel.hidden=true;el.rp.hidden=el.cp.hidden=el.tp.hidden=true;resetEmptyState();el.ds.focus();}
 
 function onGen(){
   el.hint.textContent='';
@@ -599,10 +638,22 @@ function handle(device,fd,td,intv,src,diags,results){
   });
   hideSt();
   if(tot===0){
+    var title = NO_DATA_TITLES[src] || ('Sin datos de ' + (SRCLBL[src] || 'equipo'));
+    var desc = NO_DATA_DESCS[src] || 'No se han recibido lecturas para este equipo en el periodo seleccionado.';
+    var hint = NO_DATA_HINTS[src] || 'Comprueba que el equipo esté conectado y transmitiendo datos.';
+    
+    showSt(title + ': no se han registrado datos para "' + device.name + '" en el periodo seleccionado.', 'warn');
+    
+    el.em.className='zen-panel zen-empty zen-empty-warn';
+    el.ei.innerHTML='<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#ED6C02" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>' +
+      '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>' +
+      '</svg>';
+    el.et.textContent=title;
+    el.ed.innerHTML='<strong>'+esc(device.name)+'</strong>: '+desc+'<br><span style="display:inline-block;margin-top:6px;font-size:12px;color:var(--g500);">'+hint+'</span>';
     el.em.hidden=false;
-    var p=el.em.querySelector('p');
-    if(p)p.innerHTML='No se encontraron lecturas para <strong>'+esc(device.name)+'</strong> en el periodo seleccionado.';
-    rep=null;return;
+    rep=null;
+    return;
   }
   var times=Object.keys(bkts).map(Number).sort(function(a,b){return a-b;});
   var rows=times.map(function(b){
@@ -677,10 +728,19 @@ function renderT(r){
   el.tbl.innerHTML='<thead><tr><th class="col-time">Fecha y hora</th>'+hc+'</tr></thead><tbody>'+tb+'</tbody>';
   el.tp.hidden=false;
 }
-function showSt(msg,err){
+function showSt(msg,type){
   el.st.hidden=false;
-  el.st.className='zen-alert '+(err?'zen-alert-e':'zen-alert-i');
-  el.st.innerHTML=(err?'':'<span class="zen-spin"></span>')+'<span>'+esc(msg)+'</span>';
+  var cls='zen-alert-i';
+  var icon='<span class="zen-spin"></span>';
+  if(type==='error'||type===true){
+    cls='zen-alert-e';
+    icon='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  }else if(type==='warn'){
+    cls='zen-alert-w';
+    icon='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  }
+  el.st.className='zen-alert '+cls;
+  el.st.innerHTML=icon+'<span>'+esc(msg)+'</span>';
 }
 function hideSt(){el.st.hidden=true;el.st.innerHTML='';}
 function onPdf(){
