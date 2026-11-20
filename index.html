@@ -626,12 +626,13 @@ function run(device,fd,td,intv,src){
   el.rp.hidden=el.cp.hidden=el.tp.hidden=true;el.em.hidden=true;el.gen.disabled=true;
   var diags=DIAGS[src]||[];
   var calls=diags.map(function(d){return['Get',{typeName:'StatusData',search:{deviceSearch:{id:device.id},diagnosticSearch:{id:d.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}];});
+  calls.push(['Get',{typeName:'LogRecord',search:{deviceSearch:{id:device.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}]);
   api.multiCall(calls,function(res){el.gen.disabled=false;handle(device,fd,td,intv,src,diags,res);},
     function(err){el.gen.disabled=false;console.error(err);showSt('No se pudieron obtener las temperaturas. Revisa la conexion.',true);});
 }
 function bkt(iso,intv){var d=new Date(iso),m=d.getHours()*60+d.getMinutes(),bm=Math.floor(m/intv)*intv;return new Date(d.getFullYear(),d.getMonth(),d.getDate(),0,bm,0,0).getTime();}
 function handle(device,fd,td,intv,src,diags,results){
-  var act=[],bkts={},tot=0;
+  var act=[],bkts={},tot=0,logs=results[diags.length]||[];
   diags.forEach(function(diag,idx){
     var recs=results[idx]||[];if(recs.length>0)act.push(diag);
     recs.forEach(function(rec){
@@ -661,14 +662,22 @@ function handle(device,fd,td,intv,src,diags,results){
     rep=null;
     return;
   }
+  logs=logs.filter(function(log){return typeof log.latitude==='number'&&typeof log.longitude==='number';}).sort(function(a,b){return new Date(a.dateTime).getTime()-new Date(b.dateTime).getTime();});
   var times=Object.keys(bkts).map(Number).sort(function(a,b){return a-b;});
   var rows=times.map(function(b){
-    var row={time:b,values:{}};
+    var row={time:b,values:{},location:null};
     act.forEach(function(d){
       var v=bkts[b][d.id];
       if(v&&v.length){var s=v.reduce(function(a,x){return a+x;},0);row.values[d.id]=s/v.length;}
       else row.values[d.id]=null;
     });
+    var nearest=null,lo=0,hi=logs.length;
+    while(lo<hi){var mid=(lo+hi)>>1;if(new Date(logs[mid].dateTime).getTime()<b)lo=mid+1;else hi=mid;}
+    var before=lo>0?logs[lo-1]:null,after=lo<logs.length?logs[lo]:null;
+    if(before&&after)nearest=Math.abs(new Date(before.dateTime).getTime()-b)<=Math.abs(new Date(after.dateTime).getTime()-b)?before:after;
+    else nearest=before||after;
+    if(nearest&&Math.abs(new Date(nearest.dateTime).getTime()-b)>intv*60000)nearest=null;
+    if(nearest)row.location=nearest.latitude.toFixed(5)+', '+nearest.longitude.toFixed(5);
     return row;
   });
   rep={deviceName:device.name,fromDate:fd,toDate:td,intervalMinutes:intv,sourceId:src,activeDiagnostics:act,rows:rows,totalReadings:tot};
@@ -729,9 +738,9 @@ function renderT(r){
       var v=row.values[d.id];
       return v===null?'<td class="nd">&mdash;</td>':'<td class="tv">'+v.toFixed(1)+'&thinsp;&deg;C</td>';
     }).join('');
-    return'<tr><td class="col-time">'+fdt(row.time)+'</td>'+c+'</tr>';
+    return'<tr><td class="col-time">'+fdt(row.time)+'</td><td>'+esc(row.location||'—')+'</td>'+c+'</tr>';
   }).join('');
-  el.tbl.innerHTML='<thead><tr><th class="col-time">Fecha y hora</th>'+hc+'</tr></thead><tbody>'+tb+'</tbody>';
+  el.tbl.innerHTML='<thead><tr><th class="col-time">Fecha y hora</th><th>Ubicación (lat., lon.)</th>'+hc+'</tr></thead><tbody>'+tb+'</tbody>';
   el.tp.hidden=false;
 }
 function showSt(msg,type){
@@ -773,9 +782,9 @@ function onPdf(){
       });
       cy+=9;
     }
-    var head=[['Fecha y hora'].concat(rep.activeDiagnostics.map(function(d){return d.label;}))];
+    var head=[['Fecha y hora','Ubicación (lat., lon.)'].concat(rep.activeDiagnostics.map(function(d){return d.label;}))];
     var body=rep.rows.map(function(row){
-      return[fdt(row.time)].concat(rep.activeDiagnostics.map(function(d){
+      return[fdt(row.time),row.location||'-'].concat(rep.activeDiagnostics.map(function(d){
         var v=row.values[d.id];return v===null?'-':v.toFixed(1)+' C';
       }));
     });
