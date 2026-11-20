@@ -167,6 +167,8 @@
 }
 .zen-app .zen-dt input[type=date] { flex: 5 !important; min-width: 0 !important; }
 .zen-app .zen-dt input[type=time] { flex: 3 !important; min-width: 0 !important; }
+.zen-app .zen-check { display:flex !important; align-items:center !important; gap:8px !important; margin:0 0 14px !important; color:var(--g700) !important; font-size:13px !important; font-weight:600 !important; }
+.zen-app .zen-check input { width:16px !important; height:16px !important; accent-color:var(--p) !important; margin:0 !important; }
 
 /* ── Filter actions row ──────────────────────────── */
 .zen-app .zen-actions {
@@ -454,6 +456,8 @@
     </div>
   </div>
 
+  <label class="zen-check"><input type="checkbox" id="includeLocation" checked> Incluir direcciones en el informe</label>
+
   <!-- Action row: button + hint -->
   <div class="zen-actions">
     <button type="button" id="generateBtn" class="zen-btn zen-btn-p">
@@ -550,7 +554,7 @@ function cache(){
   el.ds=$('deviceSearch');el.dr=$('deviceResults');el.dsel=$('deviceSelected');
   el.dsn=$('deviceSelectedName');el.dcb=$('deviceClearBtn');
   el.fd=$('fromDate');el.ft=$('fromTime');el.td=$('toDate');el.tt=$('toTime');
-  el.src=$('sourceSelect');el.int=$('intervalSelect');el.gen=$('generateBtn');
+  el.src=$('sourceSelect');el.int=$('intervalSelect');el.loc=$('includeLocation');el.gen=$('generateBtn');
   el.hint=$('formHint');el.st=$('statusPanel');
   el.rp=$('resultsPanel');el.rt=$('resultsTitle');el.rb=$('resultsBadges');
   el.cp=$('chartPanel');el.cl=$('chartLegend');el.cv=$('tempChart');
@@ -622,17 +626,18 @@ function onGen(){
   run(dev,fd,td,parseInt(el.int.value,10),el.src.value);
 }
 function run(device,fd,td,intv,src){
+  var includeLocation=el.loc.checked;
   showSt('Consultando temperaturas de "'+device.name+'"...',false);
   el.rp.hidden=el.cp.hidden=el.tp.hidden=true;el.em.hidden=true;el.gen.disabled=true;
   var diags=DIAGS[src]||[];
   var calls=diags.map(function(d){return['Get',{typeName:'StatusData',search:{deviceSearch:{id:device.id},diagnosticSearch:{id:d.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}];});
-  calls.push(['Get',{typeName:'LogRecord',search:{deviceSearch:{id:device.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}]);
-  api.multiCall(calls,function(res){el.gen.disabled=false;handle(device,fd,td,intv,src,diags,res);},
+  if(includeLocation)calls.push(['Get',{typeName:'LogRecord',search:{deviceSearch:{id:device.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}]);
+  api.multiCall(calls,function(res){el.gen.disabled=false;handle(device,fd,td,intv,src,diags,res,includeLocation);},
     function(err){el.gen.disabled=false;console.error(err);showSt('No se pudieron obtener las temperaturas. Revisa la conexion.',true);});
 }
 function bkt(iso,intv){var d=new Date(iso),m=d.getHours()*60+d.getMinutes(),bm=Math.floor(m/intv)*intv;return new Date(d.getFullYear(),d.getMonth(),d.getDate(),0,bm,0,0).getTime();}
-function handle(device,fd,td,intv,src,diags,results){
-  var act=[],bkts={},tot=0,logs=results[diags.length]||[];
+function handle(device,fd,td,intv,src,diags,results,includeLocation){
+  var act=[],bkts={},tot=0,logs=includeLocation?(results[diags.length]||[]):[];
   diags.forEach(function(diag,idx){
     var recs=results[idx]||[];if(recs.length>0)act.push(diag);
     recs.forEach(function(rec){
@@ -677,11 +682,21 @@ function handle(device,fd,td,intv,src,diags,results){
     if(before&&after)nearest=Math.abs(new Date(before.dateTime).getTime()-b)<=Math.abs(new Date(after.dateTime).getTime()-b)?before:after;
     else nearest=before||after;
     if(nearest&&Math.abs(new Date(nearest.dateTime).getTime()-b)>intv*60000)nearest=null;
-    if(nearest)row.location=nearest.latitude.toFixed(5)+', '+nearest.longitude.toFixed(5);
+    if(nearest)row.coordinates={x:nearest.longitude,y:nearest.latitude};
     return row;
   });
-  rep={deviceName:device.name,fromDate:fd,toDate:td,intervalMinutes:intv,sourceId:src,activeDiagnostics:act,rows:rows,totalReadings:tot};
-  renderH(rep);renderCh(rep);renderT(rep);
+  rep={deviceName:device.name,fromDate:fd,toDate:td,intervalMinutes:intv,sourceId:src,activeDiagnostics:act,rows:rows,totalReadings:tot,includeLocation:includeLocation};
+  if(includeLocation)resolveAddresses(rows,0,function(){renderH(rep);renderCh(rep);renderT(rep);});
+  else{renderH(rep);renderCh(rep);renderT(rep);}
+}
+function resolveAddresses(rows,start,done){
+  var end=Math.min(start+100,rows.length),indexes=[],coords=[];
+  for(var i=start;i<end;i++)if(rows[i].coordinates){indexes.push(i);coords.push(rows[i].coordinates);}
+  if(!coords.length){if(end<rows.length)resolveAddresses(rows,end,done);else done();return;}
+  api.call('GetAddresses',{coordinates:coords,movingAddresses:true},function(addresses){
+    (addresses||[]).forEach(function(a,j){var label=a.formattedAddress||a.address||a.street||a.city;if(label)rows[indexes[j]].location=label;});
+    if(end<rows.length)resolveAddresses(rows,end,done);else done();
+  },function(err){console.error(err);if(end<rows.length)resolveAddresses(rows,end,done);else done();});
 }
 function renderH(r){
   el.rt.textContent=r.deviceName;
@@ -738,9 +753,9 @@ function renderT(r){
       var v=row.values[d.id];
       return v===null?'<td class="nd">&mdash;</td>':'<td class="tv">'+v.toFixed(1)+'&thinsp;&deg;C</td>';
     }).join('');
-    return'<tr><td class="col-time">'+fdt(row.time)+'</td><td>'+esc(row.location||'—')+'</td>'+c+'</tr>';
+    return'<tr><td class="col-time">'+fdt(row.time)+'</td>'+(r.includeLocation?'<td>'+esc(row.location||'—')+'</td>':'')+c+'</tr>';
   }).join('');
-  el.tbl.innerHTML='<thead><tr><th class="col-time">Fecha y hora</th><th>Ubicación (lat., lon.)</th>'+hc+'</tr></thead><tbody>'+tb+'</tbody>';
+  el.tbl.innerHTML='<thead><tr><th class="col-time">Fecha y hora</th>'+(r.includeLocation?'<th>Dirección</th>':'')+hc+'</tr></thead><tbody>'+tb+'</tbody>';
   el.tp.hidden=false;
 }
 function showSt(msg,type){
@@ -782,9 +797,9 @@ function onPdf(){
       });
       cy+=9;
     }
-    var head=[['Fecha y hora','Ubicación (lat., lon.)'].concat(rep.activeDiagnostics.map(function(d){return d.label;}))];
+    var head=[['Fecha y hora'].concat(rep.includeLocation?['Dirección']:[]).concat(rep.activeDiagnostics.map(function(d){return d.label;}))];
     var body=rep.rows.map(function(row){
-      return[fdt(row.time),row.location||'-'].concat(rep.activeDiagnostics.map(function(d){
+      return[fdt(row.time)].concat(rep.includeLocation?[row.location||'-']:[]).concat(rep.activeDiagnostics.map(function(d){
         var v=row.values[d.id];return v===null?'-':v.toFixed(1)+' C';
       }));
     });
