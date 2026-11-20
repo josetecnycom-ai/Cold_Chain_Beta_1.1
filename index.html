@@ -141,6 +141,8 @@
   border-color: var(--p) !important;
   box-shadow: 0 0 0 2px rgba(0,100,168,.2) !important;
 }
+.zen-app select.zen-in[multiple] { height:auto !important; min-height:76px !important; padding:4px !important; }
+.zen-app select.zen-in[multiple] option { padding:3px 6px !important; }
 
 /* ── Filter grid: 4 columns, 2-col datetime pairs ── */
 .zen-app .zen-grid {
@@ -439,11 +441,12 @@
     </div>
     <div>
       <label class="zen-lbl" for="sourceSelect">Origen de datos</label>
-      <select id="sourceSelect" class="zen-in">
+      <select id="sourceSelect" class="zen-in" multiple size="3" aria-describedby="sourceHelp">
         <option value="thermograph">Termografo</option>
-        <option value="machine">Maquina de frio</option>
+        <option value="machine" selected>Maquina de frio</option>
         <option value="probes">Sondas</option>
       </select>
+      <small id="sourceHelp" style="display:block;color:var(--g500);font-size:11px;margin-top:3px">Mantén Ctrl (Windows) o Cmd (Mac) para elegir varias opciones.</small>
     </div>
     <div>
       <label class="zen-lbl" for="intervalSelect">Intervalo</label>
@@ -623,20 +626,23 @@ function onGen(){
   if(isNaN(fd)||isNaN(td)){el.hint.textContent='Fechas u horas no validas.';return;}
   if(fd>td){el.hint.textContent='La fecha/hora de inicio debe ser anterior a la de fin.';return;}
   if((td-fd)/86400000>92)el.hint.textContent='Aviso: rango superior a 3 meses; puede tardar mas.';
-  run(dev,fd,td,parseInt(el.int.value,10),el.src.value);
+  var sources=Array.prototype.filter.call(el.src.options,function(o){return o.selected;}).map(function(o){return o.value;});
+  if(!sources.length){el.hint.textContent='Selecciona al menos un origen de datos.';return;}
+  run(dev,fd,td,parseInt(el.int.value,10),sources);
 }
-function run(device,fd,td,intv,src){
+function run(device,fd,td,intv,sources){
   var includeLocation=el.loc.checked;
   showSt('Consultando temperaturas de "'+device.name+'"...',false);
   el.rp.hidden=el.cp.hidden=el.tp.hidden=true;el.em.hidden=true;el.gen.disabled=true;
-  var diags=DIAGS[src]||[];
+  var diags=[];
+  sources.forEach(function(source){(DIAGS[source]||[]).forEach(function(d){diags.push({id:d.id,label:d.label,sourceId:source});});});
   var calls=diags.map(function(d){return['Get',{typeName:'StatusData',search:{deviceSearch:{id:device.id},diagnosticSearch:{id:d.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}];});
   if(includeLocation)calls.push(['Get',{typeName:'LogRecord',search:{deviceSearch:{id:device.id},fromDate:fd.toISOString(),toDate:td.toISOString()},resultsLimit:50000}]);
-  api.multiCall(calls,function(res){el.gen.disabled=false;handle(device,fd,td,intv,src,diags,res,includeLocation);},
+  api.multiCall(calls,function(res){el.gen.disabled=false;handle(device,fd,td,intv,sources,diags,res,includeLocation);},
     function(err){el.gen.disabled=false;console.error(err);showSt('No se pudieron obtener las temperaturas. Revisa la conexion.',true);});
 }
 function bkt(iso,intv){var d=new Date(iso),m=d.getHours()*60+d.getMinutes(),bm=Math.floor(m/intv)*intv;return new Date(d.getFullYear(),d.getMonth(),d.getDate(),0,bm,0,0).getTime();}
-function handle(device,fd,td,intv,src,diags,results,includeLocation){
+function handle(device,fd,td,intv,sources,diags,results,includeLocation){
   var act=[],bkts={},tot=0,logs=includeLocation?(results[diags.length]||[]):[];
   diags.forEach(function(diag,idx){
     var recs=results[idx]||[];if(recs.length>0)act.push(diag);
@@ -650,9 +656,10 @@ function handle(device,fd,td,intv,src,diags,results,includeLocation){
   });
   hideSt();
   if(tot===0){
-    var title = NO_DATA_TITLES[src] || ('Sin datos de ' + (SRCLBL[src] || 'equipo'));
-    var desc = NO_DATA_DESCS[src] || 'No se han recibido lecturas para este equipo en el periodo seleccionado.';
-    var hint = NO_DATA_HINTS[src] || 'Comprueba que el equipo esté conectado y transmitiendo datos.';
+    var sourceNames=sources.map(function(source){return SRCLBL[source];}).join(', ');
+    var title='Sin datos de temperatura';
+    var desc='No se han recibido lecturas de '+sourceNames+' en el periodo seleccionado.';
+    var hint='Comprueba que los equipos seleccionados estén conectados y transmitiendo datos.';
     
     showSt(title + ': no se han registrado datos para "' + device.name + '" en el periodo seleccionado.', 'warn');
     
@@ -685,7 +692,7 @@ function handle(device,fd,td,intv,src,diags,results,includeLocation){
     if(nearest)row.coordinates={x:nearest.longitude,y:nearest.latitude};
     return row;
   });
-  rep={deviceName:device.name,fromDate:fd,toDate:td,intervalMinutes:intv,sourceId:src,activeDiagnostics:act,rows:rows,totalReadings:tot,includeLocation:includeLocation};
+  rep={deviceName:device.name,fromDate:fd,toDate:td,intervalMinutes:intv,sourceIds:sources,activeDiagnostics:act,rows:rows,totalReadings:tot,includeLocation:includeLocation};
   if(includeLocation)resolveAddresses(rows,0,function(){renderH(rep);renderCh(rep);renderT(rep);});
   else{renderH(rep);renderCh(rep);renderT(rep);}
 }
@@ -701,7 +708,7 @@ function resolveAddresses(rows,start,done){
 function renderH(r){
   el.rt.textContent=r.deviceName;
   el.rb.innerHTML=
-    '<span class="zen-chip zen-chip-p">'+esc(SRCLBL[r.sourceId])+'</span>'+
+    '<span class="zen-chip zen-chip-p">'+esc(r.sourceIds.map(function(source){return SRCLBL[source];}).join(', '))+'</span>'+
     '<span class="zen-chip">'+fdt(r.fromDate.getTime())+' &rarr; '+fdt(r.toDate.getTime())+'</span>'+
     '<span class="zen-chip">'+ilbl(r.intervalMinutes)+'</span>'+
     '<span class="zen-chip">'+r.totalReadings+' lecturas</span>';
@@ -781,7 +788,7 @@ function onPdf(){
     doc.setFontSize(15);doc.setTextColor(33,33,33);
     doc.text('Informe de Temperaturas - Cadena de Frio [BETA]',14,16);
     doc.setFontSize(9);doc.setTextColor(117,117,117);
-    doc.text('Activo: '+rep.deviceName+'   |   Origen: '+SRCLBL[rep.sourceId],14,23);
+    doc.text('Activo: '+rep.deviceName+'   |   Origen: '+rep.sourceIds.map(function(source){return SRCLBL[source];}).join(', '),14,23);
     doc.text('Periodo: '+fdt(rep.fromDate.getTime())+' a '+fdt(rep.toDate.getTime())+'   |   Intervalo: '+ilbl(rep.intervalMinutes)+'   |   Lecturas: '+rep.totalReadings,14,28);
     var cy=33;
     if(chart){
